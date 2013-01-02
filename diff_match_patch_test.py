@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2.4
 
 """Test harness for diff_match_patch.py
 
@@ -18,9 +18,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import sys
+import time
 import unittest
 import diff_match_patch as dmp_module
-# Force a module reload so to make debugging easier (at least in PythonWin).
+# Force a module reload.  Allows one to edit the DMP module and rerun the tests
+# without leaving the Python interpreter.
 reload(dmp_module)
 
 class DiffMatchPatchTest(unittest.TestCase):
@@ -45,47 +48,81 @@ class DiffTest(DiffMatchPatchTest):
   """DIFF TEST FUNCTIONS"""
 
   def testDiffCommonPrefix(self):
-    # Detect and remove any common prefix.
-    # Null case
+    # Detect any common prefix.
+    # Null case.
     self.assertEquals(0, self.dmp.diff_commonPrefix("abc", "xyz"))
 
-    # Non-null case
+    # Non-null case.
     self.assertEquals(4, self.dmp.diff_commonPrefix("1234abcdef", "1234xyz"))
 
+    # Whole case.
+    self.assertEquals(4, self.dmp.diff_commonPrefix("1234", "1234xyz"))
+
   def testDiffCommonSuffix(self):
-    # Detect and remove any common suffix.
-    # Null case
+    # Detect any common suffix.
+    # Null case.
     self.assertEquals(0, self.dmp.diff_commonSuffix("abc", "xyz"))
 
-    # Non-null case
+    # Non-null case.
     self.assertEquals(4, self.dmp.diff_commonSuffix("abcdef1234", "xyz1234"))
+
+    # Whole case.
+    self.assertEquals(4, self.dmp.diff_commonSuffix("1234", "xyz1234"))
+
+  def testDiffCommonOverlap(self):
+    # Null case.
+    self.assertEquals(0, self.dmp.diff_commonOverlap("", "abcd"))
+
+    # Whole case.
+    self.assertEquals(3, self.dmp.diff_commonOverlap("abc", "abcd"))
+
+    # No overlap.
+    self.assertEquals(0, self.dmp.diff_commonOverlap("123456", "abcd"))
+
+    # Overlap.
+    self.assertEquals(3, self.dmp.diff_commonOverlap("123456xxx", "xxxabcd"))
 
   def testDiffHalfMatch(self):
     # Detect a halfmatch.
-    # No match
+    self.dmp.Diff_Timeout = 1
+    # No match.
     self.assertEquals(None, self.dmp.diff_halfMatch("1234567890", "abcdef"))
 
-    # Single Match
+    self.assertEquals(None, self.dmp.diff_halfMatch("12345", "23"))
+
+    # Single Match.
     self.assertEquals(("12", "90", "a", "z", "345678"), self.dmp.diff_halfMatch("1234567890", "a345678z"))
 
     self.assertEquals(("a", "z", "12", "90", "345678"), self.dmp.diff_halfMatch("a345678z", "1234567890"))
 
-    # Multiple Matches
+    self.assertEquals(("abc", "z", "1234", "0", "56789"), self.dmp.diff_halfMatch("abc56789z", "1234567890"))
+
+    self.assertEquals(("a", "xyz", "1", "7890", "23456"), self.dmp.diff_halfMatch("a23456xyz", "1234567890"))
+
+    # Multiple Matches.
     self.assertEquals(("12123", "123121", "a", "z", "1234123451234"), self.dmp.diff_halfMatch("121231234123451234123121", "a1234123451234z"))
 
     self.assertEquals(("", "-=-=-=-=-=", "x", "", "x-=-=-=-=-=-=-="), self.dmp.diff_halfMatch("x-=-=-=-=-=-=-=-=-=-=-=-=", "xx-=-=-=-=-=-=-="))
 
     self.assertEquals(("-=-=-=-=-=", "", "", "y", "-=-=-=-=-=-=-=y"), self.dmp.diff_halfMatch("-=-=-=-=-=-=-=-=-=-=-=-=y", "-=-=-=-=-=-=-=yy"))
 
+    # Non-optimal halfmatch.
+    # Optimal diff would be -q+x=H-i+e=lloHe+Hu=llo-Hew+y not -qHillo+x=HelloHe-w+Hulloy
+    self.assertEquals(("qHillo", "w", "x", "Hulloy", "HelloHe"), self.dmp.diff_halfMatch("qHilloHelloHew", "xHelloHeHulloy"))
+
+    # Optimal no halfmatch.
+    self.dmp.Diff_Timeout = 0
+    self.assertEquals(None, self.dmp.diff_halfMatch("qHilloHelloHew", "xHelloHeHulloy"))
+
   def testDiffLinesToChars(self):
-    # Convert lines down to characters
+    # Convert lines down to characters.
     self.assertEquals(("\x01\x02\x01", "\x02\x01\x02", ["", "alpha\n", "beta\n"]), self.dmp.diff_linesToChars("alpha\nbeta\nalpha\n", "beta\nalpha\nbeta\n"))
 
     self.assertEquals(("", "\x01\x02\x03\x03", ["", "alpha\r\n", "beta\r\n", "\r\n"]), self.dmp.diff_linesToChars("", "alpha\r\nbeta\r\n\r\n\r\n"))
 
     self.assertEquals(("\x01", "\x02", ["", "a", "b"]), self.dmp.diff_linesToChars("a", "b"))
 
-    # More than 256
+    # More than 256 to reveal any 8-bit limitations.
     n = 300
     lineList = []
     charList = []
@@ -100,12 +137,12 @@ class DiffTest(DiffMatchPatchTest):
     self.assertEquals((chars, "", lineList), self.dmp.diff_linesToChars(lines, ""))
 
   def testDiffCharsToLines(self):
-    # Convert chars up to lines
+    # Convert chars up to lines.
     diffs = [(self.dmp.DIFF_EQUAL, "\x01\x02\x01"), (self.dmp.DIFF_INSERT, "\x02\x01\x02")]
     self.dmp.diff_charsToLines(diffs, ["", "alpha\n", "beta\n"])
     self.assertEquals([(self.dmp.DIFF_EQUAL, "alpha\nbeta\nalpha\n"), (self.dmp.DIFF_INSERT, "beta\nalpha\nbeta\n")], diffs)
 
-    # More than 256
+    # More than 256 to reveal any 8-bit limitations.
     n = 300
     lineList = []
     charList = []
@@ -122,160 +159,180 @@ class DiffTest(DiffMatchPatchTest):
     self.assertEquals([(self.dmp.DIFF_DELETE, lines)], diffs)
 
   def testDiffCleanupMerge(self):
-    # Cleanup a messy diff
-    # Null case
+    # Cleanup a messy diff.
+    # Null case.
     diffs = []
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([], diffs)
 
-    # No change case
+    # No change case.
     diffs = [(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "b"), (self.dmp.DIFF_INSERT, "c")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "b"), (self.dmp.DIFF_INSERT, "c")], diffs)
 
-    # Merge equalities
+    # Merge equalities.
     diffs = [(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_EQUAL, "b"), (self.dmp.DIFF_EQUAL, "c")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "abc")], diffs)
 
-    # Merge deletions
+    # Merge deletions.
     diffs = [(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_DELETE, "b"), (self.dmp.DIFF_DELETE, "c")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "abc")], diffs)
 
-    # Merge insertions
+    # Merge insertions.
     diffs = [(self.dmp.DIFF_INSERT, "a"), (self.dmp.DIFF_INSERT, "b"), (self.dmp.DIFF_INSERT, "c")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_INSERT, "abc")], diffs)
 
-    # Merge interweave
+    # Merge interweave.
     diffs = [(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "b"), (self.dmp.DIFF_DELETE, "c"), (self.dmp.DIFF_INSERT, "d"), (self.dmp.DIFF_EQUAL, "e"), (self.dmp.DIFF_EQUAL, "f")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "ac"), (self.dmp.DIFF_INSERT, "bd"), (self.dmp.DIFF_EQUAL, "ef")], diffs)
 
-    # Prefix and suffix detection
+    # Prefix and suffix detection.
     diffs = [(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "abc"), (self.dmp.DIFF_DELETE, "dc")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "d"), (self.dmp.DIFF_INSERT, "b"), (self.dmp.DIFF_EQUAL, "c")], diffs)
 
-    # Slide edit left
+    # Prefix and suffix detection with equalities.
+    diffs = [(self.dmp.DIFF_EQUAL, "x"), (self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "abc"), (self.dmp.DIFF_DELETE, "dc"), (self.dmp.DIFF_EQUAL, "y")]
+    self.dmp.diff_cleanupMerge(diffs)
+    self.assertEquals([(self.dmp.DIFF_EQUAL, "xa"), (self.dmp.DIFF_DELETE, "d"), (self.dmp.DIFF_INSERT, "b"), (self.dmp.DIFF_EQUAL, "cy")], diffs)
+
+    # Slide edit left.
     diffs = [(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_INSERT, "ba"), (self.dmp.DIFF_EQUAL, "c")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_INSERT, "ab"), (self.dmp.DIFF_EQUAL, "ac")], diffs)
 
-    # Slide edit right
+    # Slide edit right.
     diffs = [(self.dmp.DIFF_EQUAL, "c"), (self.dmp.DIFF_INSERT, "ab"), (self.dmp.DIFF_EQUAL, "a")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "ca"), (self.dmp.DIFF_INSERT, "ba")], diffs)
 
-    # Slide edit left recursive
+    # Slide edit left recursive.
     diffs = [(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "b"), (self.dmp.DIFF_EQUAL, "c"), (self.dmp.DIFF_DELETE, "ac"), (self.dmp.DIFF_EQUAL, "x")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_EQUAL, "acx")], diffs)
 
-    # Slide edit right recursive
+    # Slide edit right recursive.
     diffs = [(self.dmp.DIFF_EQUAL, "x"), (self.dmp.DIFF_DELETE, "ca"), (self.dmp.DIFF_EQUAL, "c"), (self.dmp.DIFF_DELETE, "b"), (self.dmp.DIFF_EQUAL, "a")]
     self.dmp.diff_cleanupMerge(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "xca"), (self.dmp.DIFF_DELETE, "cba")], diffs)
 
   def testDiffCleanupSemanticLossless(self):
-    # Slide diffs to match logical boundaries
-    # Null case
+    # Slide diffs to match logical boundaries.
+    # Null case.
     diffs = []
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([], diffs)
 
-    # Blank lines
+    # Blank lines.
     diffs = [(self.dmp.DIFF_EQUAL, "AAA\r\n\r\nBBB"), (self.dmp.DIFF_INSERT, "\r\nDDD\r\n\r\nBBB"), (self.dmp.DIFF_EQUAL, "\r\nEEE")]
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "AAA\r\n\r\n"), (self.dmp.DIFF_INSERT, "BBB\r\nDDD\r\n\r\n"), (self.dmp.DIFF_EQUAL, "BBB\r\nEEE")], diffs)
 
-    # Line boundaries
+    # Line boundaries.
     diffs = [(self.dmp.DIFF_EQUAL, "AAA\r\nBBB"), (self.dmp.DIFF_INSERT, " DDD\r\nBBB"), (self.dmp.DIFF_EQUAL, " EEE")]
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "AAA\r\n"), (self.dmp.DIFF_INSERT, "BBB DDD\r\n"), (self.dmp.DIFF_EQUAL, "BBB EEE")], diffs)
 
-    # Word boundaries
+    # Word boundaries.
     diffs = [(self.dmp.DIFF_EQUAL, "The c"), (self.dmp.DIFF_INSERT, "ow and the c"), (self.dmp.DIFF_EQUAL, "at.")]
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "The "), (self.dmp.DIFF_INSERT, "cow and the "), (self.dmp.DIFF_EQUAL, "cat.")], diffs)
 
-    # Alphanumeric boundaries
+    # Alphanumeric boundaries.
     diffs = [(self.dmp.DIFF_EQUAL, "The-c"), (self.dmp.DIFF_INSERT, "ow-and-the-c"), (self.dmp.DIFF_EQUAL, "at.")]
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "The-"), (self.dmp.DIFF_INSERT, "cow-and-the-"), (self.dmp.DIFF_EQUAL, "cat.")], diffs)
 
-    # Hitting the start
+    # Hitting the start.
     diffs = [(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_EQUAL, "ax")]
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_EQUAL, "aax")], diffs)
 
-    # Hitting the end
+    # Hitting the end.
     diffs = [(self.dmp.DIFF_EQUAL, "xa"), (self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_EQUAL, "a")]
     self.dmp.diff_cleanupSemanticLossless(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "xaa"), (self.dmp.DIFF_DELETE, "a")], diffs)
 
   def testDiffCleanupSemantic(self):
-    # Cleanup semantically trivial equalities
-    # Null case
+    # Cleanup semantically trivial equalities.
+    # Null case.
     diffs = []
     self.dmp.diff_cleanupSemantic(diffs)
     self.assertEquals([], diffs)
 
-    # No elimination
-    diffs = [(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "b"), (self.dmp.DIFF_EQUAL, "cd"), (self.dmp.DIFF_DELETE, "e")]
+    # No elimination #1.
+    diffs = [(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "cd"), (self.dmp.DIFF_EQUAL, "12"), (self.dmp.DIFF_DELETE, "e")]
     self.dmp.diff_cleanupSemantic(diffs)
-    self.assertEquals([(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "b"), (self.dmp.DIFF_EQUAL, "cd"), (self.dmp.DIFF_DELETE, "e")], diffs)
+    self.assertEquals([(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "cd"), (self.dmp.DIFF_EQUAL, "12"), (self.dmp.DIFF_DELETE, "e")], diffs)
 
-    # Simple elimination
+    # No elimination #2.
+    diffs = [(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_INSERT, "ABC"), (self.dmp.DIFF_EQUAL, "1234"), (self.dmp.DIFF_DELETE, "wxyz")]
+    self.dmp.diff_cleanupSemantic(diffs)
+    self.assertEquals([(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_INSERT, "ABC"), (self.dmp.DIFF_EQUAL, "1234"), (self.dmp.DIFF_DELETE, "wxyz")], diffs)
+
+    # Simple elimination.
     diffs = [(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_EQUAL, "b"), (self.dmp.DIFF_DELETE, "c")]
     self.dmp.diff_cleanupSemantic(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_INSERT, "b")], diffs)
 
-    # Backpass elimination
+    # Backpass elimination.
     diffs = [(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_EQUAL, "cd"), (self.dmp.DIFF_DELETE, "e"), (self.dmp.DIFF_EQUAL, "f"), (self.dmp.DIFF_INSERT, "g")]
     self.dmp.diff_cleanupSemantic(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "abcdef"), (self.dmp.DIFF_INSERT, "cdfg")], diffs)
 
-    # Multiple eliminations
+    # Multiple eliminations.
     diffs = [(self.dmp.DIFF_INSERT, "1"), (self.dmp.DIFF_EQUAL, "A"), (self.dmp.DIFF_DELETE, "B"), (self.dmp.DIFF_INSERT, "2"), (self.dmp.DIFF_EQUAL, "_"), (self.dmp.DIFF_INSERT, "1"), (self.dmp.DIFF_EQUAL, "A"), (self.dmp.DIFF_DELETE, "B"), (self.dmp.DIFF_INSERT, "2")]
     self.dmp.diff_cleanupSemantic(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "AB_AB"), (self.dmp.DIFF_INSERT, "1A2_1A2")], diffs)
 
-    # Word boundaries
+    # Word boundaries.
     diffs = [(self.dmp.DIFF_EQUAL, "The c"), (self.dmp.DIFF_DELETE, "ow and the c"), (self.dmp.DIFF_EQUAL, "at.")]
     self.dmp.diff_cleanupSemantic(diffs)
     self.assertEquals([(self.dmp.DIFF_EQUAL, "The "), (self.dmp.DIFF_DELETE, "cow and the "), (self.dmp.DIFF_EQUAL, "cat.")], diffs)
 
+    # Overlap elimination #1.
+    diffs = [(self.dmp.DIFF_DELETE, "abcxx"), (self.dmp.DIFF_INSERT, "xxdef")]
+    self.dmp.diff_cleanupSemantic(diffs)
+    self.assertEquals([(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_EQUAL, "xx"), (self.dmp.DIFF_INSERT, "def")], diffs)
+
+    # Overlap elimination #2.
+    diffs = [(self.dmp.DIFF_DELETE, "abcxx"), (self.dmp.DIFF_INSERT, "xxdef"), (self.dmp.DIFF_DELETE, "ABCXX"), (self.dmp.DIFF_INSERT, "XXDEF")]
+    self.dmp.diff_cleanupSemantic(diffs)
+    self.assertEquals([(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_EQUAL, "xx"), (self.dmp.DIFF_INSERT, "def"), (self.dmp.DIFF_DELETE, "ABC"), (self.dmp.DIFF_EQUAL, "XX"), (self.dmp.DIFF_INSERT, "DEF")], diffs)
+
   def testDiffCleanupEfficiency(self):
-    # Cleanup operationally trivial equalities
+    # Cleanup operationally trivial equalities.
     self.dmp.Diff_EditCost = 4
-    # Null case
+    # Null case.
     diffs = []
     self.dmp.diff_cleanupEfficiency(diffs)
     self.assertEquals([], diffs)
 
-    # No elimination
+    # No elimination.
     diffs = [(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "12"), (self.dmp.DIFF_EQUAL, "wxyz"), (self.dmp.DIFF_DELETE, "cd"), (self.dmp.DIFF_INSERT, "34")]
     self.dmp.diff_cleanupEfficiency(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "12"), (self.dmp.DIFF_EQUAL, "wxyz"), (self.dmp.DIFF_DELETE, "cd"), (self.dmp.DIFF_INSERT, "34")], diffs)
 
-    # Four-edit elimination
+    # Four-edit elimination.
     diffs = [(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "12"), (self.dmp.DIFF_EQUAL, "xyz"), (self.dmp.DIFF_DELETE, "cd"), (self.dmp.DIFF_INSERT, "34")]
     self.dmp.diff_cleanupEfficiency(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "abxyzcd"), (self.dmp.DIFF_INSERT, "12xyz34")], diffs)
 
-    # Three-edit elimination
+    # Three-edit elimination.
     diffs = [(self.dmp.DIFF_INSERT, "12"), (self.dmp.DIFF_EQUAL, "x"), (self.dmp.DIFF_DELETE, "cd"), (self.dmp.DIFF_INSERT, "34")]
     self.dmp.diff_cleanupEfficiency(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "xcd"), (self.dmp.DIFF_INSERT, "12x34")], diffs)
 
-    # Backpass elimination
+    # Backpass elimination.
     diffs = [(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "12"), (self.dmp.DIFF_EQUAL, "xy"), (self.dmp.DIFF_INSERT, "34"), (self.dmp.DIFF_EQUAL, "z"), (self.dmp.DIFF_DELETE, "cd"), (self.dmp.DIFF_INSERT, "56")]
     self.dmp.diff_cleanupEfficiency(diffs)
     self.assertEquals([(self.dmp.DIFF_DELETE, "abxyzcd"), (self.dmp.DIFF_INSERT, "12xy34z56")], diffs)
 
-    # High cost elimination
+    # High cost elimination.
     self.dmp.Diff_EditCost = 5
     diffs = [(self.dmp.DIFF_DELETE, "ab"), (self.dmp.DIFF_INSERT, "12"), (self.dmp.DIFF_EQUAL, "wxyz"), (self.dmp.DIFF_DELETE, "cd"), (self.dmp.DIFF_INSERT, "34")]
     self.dmp.diff_cleanupEfficiency(diffs)
@@ -283,19 +340,19 @@ class DiffTest(DiffMatchPatchTest):
     self.dmp.Diff_EditCost = 4
 
   def testDiffPrettyHtml(self):
-    # Pretty print
+    # Pretty print.
     diffs = [(self.dmp.DIFF_EQUAL, "a\n"), (self.dmp.DIFF_DELETE, "<B>b</B>"), (self.dmp.DIFF_INSERT, "c&d")]
-    self.assertEquals("<SPAN TITLE=\"i=0\">a&para;<BR></SPAN><DEL STYLE=\"background:#FFE6E6;\" TITLE=\"i=2\">&lt;B&gt;b&lt;/B&gt;</DEL><INS STYLE=\"background:#E6FFE6;\" TITLE=\"i=2\">c&amp;d</INS>", self.dmp.diff_prettyHtml(diffs))
+    self.assertEquals("<span>a&para;<br></span><del style=\"background:#ffe6e6;\">&lt;B&gt;b&lt;/B&gt;</del><ins style=\"background:#e6ffe6;\">c&amp;d</ins>", self.dmp.diff_prettyHtml(diffs))
 
   def testDiffText(self):
-    # Compute the source and destination texts
+    # Compute the source and destination texts.
     diffs = [(self.dmp.DIFF_EQUAL, "jump"), (self.dmp.DIFF_DELETE, "s"), (self.dmp.DIFF_INSERT, "ed"), (self.dmp.DIFF_EQUAL, " over "), (self.dmp.DIFF_DELETE, "the"), (self.dmp.DIFF_INSERT, "a"), (self.dmp.DIFF_EQUAL, " lazy")]
     self.assertEquals("jumps over the lazy", self.dmp.diff_text1(diffs))
 
     self.assertEquals("jumped over a lazy", self.dmp.diff_text2(diffs))
 
   def testDiffDelta(self):
-    # Convert a diff into delta string
+    # Convert a diff into delta string.
     diffs = [(self.dmp.DIFF_EQUAL, "jump"), (self.dmp.DIFF_DELETE, "s"), (self.dmp.DIFF_INSERT, "ed"), (self.dmp.DIFF_EQUAL, " over "), (self.dmp.DIFF_DELETE, "the"), (self.dmp.DIFF_INSERT, "a"), (self.dmp.DIFF_EQUAL, " lazy"), (self.dmp.DIFF_INSERT, "old dog")]
     text1 = self.dmp.diff_text1(diffs)
     self.assertEquals("jumps over the lazy", text1)
@@ -303,28 +360,34 @@ class DiffTest(DiffMatchPatchTest):
     delta = self.dmp.diff_toDelta(diffs)
     self.assertEquals("=4\t-1\t+ed\t=6\t-3\t+a\t=5\t+old dog", delta)
 
-    # Convert delta string into a diff
+    # Convert delta string into a diff.
     self.assertEquals(diffs, self.dmp.diff_fromDelta(text1, delta))
 
-    # Generates error (19 != 20)
+    # Generates error (19 != 20).
     try:
-      self.assertEquals(ValueError, self.dmp.diff_fromDelta(text1 + "x", delta))
+      self.dmp.diff_fromDelta(text1 + "x", delta)
+      self.assertFalse(True)
     except ValueError:
-      self.assertTrue(True)
+      # Exception expected.
+      pass
 
-    # Generates error (19 != 18)
+    # Generates error (19 != 18).
     try:
-      self.assertEquals(None, self.dmp.diff_fromDelta(text1[1:], delta))
+      self.dmp.diff_fromDelta(text1[1:], delta)
+      self.assertFalse(True)
     except ValueError:
-      self.assertTrue(True)
+      # Exception expected.
+      pass
 
-    # Generates error (%c3%xy invalid Unicode)
+    # Generates error (%c3%xy invalid Unicode).
     try:
-      self.assertEquals(None, self.dmp.diff_fromDelta("", "+%c3xy"))
+      self.dmp.diff_fromDelta("", "+%c3xy")
+      self.assertFalse(True)
     except ValueError:
-      self.assertTrue(True)
+      # Exception expected.
+      pass
 
-    # Test deltas with special characters
+    # Test deltas with special characters.
     diffs = [(self.dmp.DIFF_EQUAL, u"\u0680 \x00 \t %"), (self.dmp.DIFF_DELETE, u"\u0681 \x01 \n ^"), (self.dmp.DIFF_INSERT, u"\u0682 \x02 \\ |")]
     text1 = self.dmp.diff_text1(diffs)
     self.assertEquals(u"\u0680 \x00 \t %\u0681 \x01 \n ^", text1)
@@ -332,10 +395,10 @@ class DiffTest(DiffMatchPatchTest):
     delta = self.dmp.diff_toDelta(diffs)
     self.assertEquals("=7\t-7\t+%DA%82 %02 %5C %7C", delta)
 
-    # Convert delta string into a diff
+    # Convert delta string into a diff.
     self.assertEquals(diffs, self.dmp.diff_fromDelta(text1, delta))
 
-    # Verify pool of unchanged characters
+    # Verify pool of unchanged characters.
     diffs = [(self.dmp.DIFF_INSERT, "A-Z a-z 0-9 - _ . ! ~ * ' ( ) ; / ? : @ & = + $ , # ")]
     text2 = self.dmp.diff_text2(diffs)
     self.assertEquals("A-Z a-z 0-9 - _ . ! ~ * \' ( ) ; / ? : @ & = + $ , # ", text2)
@@ -343,14 +406,14 @@ class DiffTest(DiffMatchPatchTest):
     delta = self.dmp.diff_toDelta(diffs)
     self.assertEquals("+A-Z a-z 0-9 - _ . ! ~ * \' ( ) ; / ? : @ & = + $ , # ", delta)
 
-    # Convert delta string into a diff
+    # Convert delta string into a diff.
     self.assertEquals(diffs, self.dmp.diff_fromDelta("", delta))
 
   def testDiffXIndex(self):
-    # Translate a location in text1 to text2
+    # Translate a location in text1 to text2.
     self.assertEquals(5, self.dmp.diff_xIndex([(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "1234"), (self.dmp.DIFF_EQUAL, "xyz")], 2))
 
-    # Translation on deletion
+    # Translation on deletion.
     self.assertEquals(1, self.dmp.diff_xIndex([(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "1234"), (self.dmp.DIFF_EQUAL, "xyz")], 3))
 
   def testDiffLevenshtein(self):
@@ -361,105 +424,110 @@ class DiffTest(DiffMatchPatchTest):
     # Levenshtein with middle equality.
     self.assertEquals(7, self.dmp.diff_levenshtein([(self.dmp.DIFF_DELETE, "abc"), (self.dmp.DIFF_EQUAL, "xyz"), (self.dmp.DIFF_INSERT, "1234")]))
 
-  def testDiffPath(self):
-    # Trace a path from back to front.
-    # Single letters
-    v_map = []
-    v_map.append({(0,0):True})
-    v_map.append({(0,1):True, (1,0):True})
-    v_map.append({(0,2):True, (2,0):True, (2,2):True})
-    v_map.append({(0,3):True, (2,3):True, (3,0):True, (4,3):True})
-    v_map.append({(0,4):True, (2,4):True, (4,0):True, (4,4):True, (5,3):True})
-    v_map.append({(0,5):True, (2,5):True, (4,5):True, (5,0):True, (6,3):True, (6,5):True})
-    v_map.append({(0,6):True, (2,6):True, (4,6):True, (6,6):True, (7,5):True})
-    self.assertEquals([(self.dmp.DIFF_INSERT, "W"), (self.dmp.DIFF_DELETE, "A"), (self.dmp.DIFF_EQUAL, "1"), (self.dmp.DIFF_DELETE, "B"), (self.dmp.DIFF_EQUAL, "2"), (self.dmp.DIFF_INSERT, "X"), (self.dmp.DIFF_DELETE, "C"), (self.dmp.DIFF_EQUAL, "3"), (self.dmp.DIFF_DELETE, "D")], self.dmp.diff_path1(v_map, "A1B2C3D", "W12X3"))
+  def testDiffBisect(self):
+    # Normal.
+    a = "cat"
+    b = "map"
+    # Since the resulting diff hasn't been normalized, it would be ok if
+    # the insertion and deletion pairs are swapped.
+    # If the order changes, tweak this test as required.
+    self.assertEquals([(self.dmp.DIFF_DELETE, "c"), (self.dmp.DIFF_INSERT, "m"), (self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "t"), (self.dmp.DIFF_INSERT, "p")], self.dmp.diff_bisect(a, b, sys.maxint))
 
-    v_map.pop()
-    self.assertEquals([(self.dmp.DIFF_EQUAL, "4"), (self.dmp.DIFF_DELETE, "E"), (self.dmp.DIFF_INSERT, "Y"), (self.dmp.DIFF_EQUAL, "5"), (self.dmp.DIFF_DELETE, "F"), (self.dmp.DIFF_EQUAL, "6"), (self.dmp.DIFF_DELETE, "G"), (self.dmp.DIFF_INSERT, "Z")], self.dmp.diff_path2(v_map, "4E5F6G", "4Y56Z"))
-
-    # Double letters
-    v_map = []
-    v_map.append({(0,0):True})
-    v_map.append({(0,1):True, (1,0):True})
-    v_map.append({(0,2):True, (1,1):True, (2,0):True})
-    v_map.append({(0,3):True, (1,2):True, (2,1):True, (3,0):True})
-    v_map.append({(0,4):True, (1,3):True, (3,1):True, (4,0):True, (4,4):True})
-    self.assertEquals([(self.dmp.DIFF_INSERT, "WX"), (self.dmp.DIFF_DELETE, "AB"), (self.dmp.DIFF_EQUAL, "12")], self.dmp.diff_path1(v_map, "AB12", "WX12"))
-
-    v_map = []
-    v_map.append({(0,0):True})
-    v_map.append({(0,1):True, (1,0):True})
-    v_map.append({(1,1):True, (2,0):True, (2,4):True})
-    v_map.append({(2,1):True, (2,5):True, (3,0):True, (3,4):True})
-    v_map.append({(2,6):True, (3,5):True, (4,4):True})
-    self.assertEquals([(self.dmp.DIFF_DELETE, "CD"), (self.dmp.DIFF_EQUAL, "34"), (self.dmp.DIFF_INSERT, "YZ")], self.dmp.diff_path2(v_map, "CD34", "34YZ"))
+    # Timeout.
+    self.assertEquals([(self.dmp.DIFF_DELETE, "cat"), (self.dmp.DIFF_INSERT, "map")], self.dmp.diff_bisect(a, b, 0))
 
   def testDiffMain(self):
-    # Perform a trivial diff
-    # Null case
+    # Perform a trivial diff.
+    # Null case.
+    self.assertEquals([], self.dmp.diff_main("", "", False))
+
+    # Equality.
     self.assertEquals([(self.dmp.DIFF_EQUAL, "abc")], self.dmp.diff_main("abc", "abc", False))
 
-    # Simple insertion
+    # Simple insertion.
     self.assertEquals([(self.dmp.DIFF_EQUAL, "ab"), (self.dmp.DIFF_INSERT, "123"), (self.dmp.DIFF_EQUAL, "c")], self.dmp.diff_main("abc", "ab123c", False))
 
-    # Simple deletion
+    # Simple deletion.
     self.assertEquals([(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "123"), (self.dmp.DIFF_EQUAL, "bc")], self.dmp.diff_main("a123bc", "abc", False))
 
-    # Two insertions
+    # Two insertions.
     self.assertEquals([(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_INSERT, "123"), (self.dmp.DIFF_EQUAL, "b"), (self.dmp.DIFF_INSERT, "456"), (self.dmp.DIFF_EQUAL, "c")], self.dmp.diff_main("abc", "a123b456c", False))
 
-    # Two deletions
+    # Two deletions.
     self.assertEquals([(self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "123"), (self.dmp.DIFF_EQUAL, "b"), (self.dmp.DIFF_DELETE, "456"), (self.dmp.DIFF_EQUAL, "c")], self.dmp.diff_main("a123b456c", "abc", False))
 
-    # Perform a real diff
+    # Perform a real diff.
     # Switch off the timeout.
     self.dmp.Diff_Timeout = 0
-    self.dmp.Diff_DualThreshold = 32
-    # Simple cases
+    # Simple cases.
     self.assertEquals([(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, "b")], self.dmp.diff_main("a", "b", False))
 
     self.assertEquals([(self.dmp.DIFF_DELETE, "Apple"), (self.dmp.DIFF_INSERT, "Banana"), (self.dmp.DIFF_EQUAL, "s are a"), (self.dmp.DIFF_INSERT, "lso"), (self.dmp.DIFF_EQUAL, " fruit.")], self.dmp.diff_main("Apples are a fruit.", "Bananas are also fruit.", False))
 
     self.assertEquals([(self.dmp.DIFF_DELETE, "a"), (self.dmp.DIFF_INSERT, u"\u0680"), (self.dmp.DIFF_EQUAL, "x"), (self.dmp.DIFF_DELETE, "\t"), (self.dmp.DIFF_INSERT, u"\x00")], self.dmp.diff_main("ax\t", u"\u0680x\x00", False))
 
-    # Overlaps
+    # Overlaps.
     self.assertEquals([(self.dmp.DIFF_DELETE, "1"), (self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "y"), (self.dmp.DIFF_EQUAL, "b"), (self.dmp.DIFF_DELETE, "2"), (self.dmp.DIFF_INSERT, "xab")], self.dmp.diff_main("1ayb2", "abxab", False))
 
     self.assertEquals([(self.dmp.DIFF_INSERT, "xaxcx"), (self.dmp.DIFF_EQUAL, "abc"), (self.dmp.DIFF_DELETE, "y")], self.dmp.diff_main("abcy", "xaxcxabc", False))
 
-    # Sub-optimal double-ended diff.
-    self.dmp.Diff_DualThreshold = 2
-    self.assertEquals([(self.dmp.DIFF_INSERT, "x"), (self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "b"), (self.dmp.DIFF_INSERT, "x"), (self.dmp.DIFF_EQUAL, "c"), (self.dmp.DIFF_DELETE, "y"), (self.dmp.DIFF_INSERT, "xabc")], self.dmp.diff_main("abcy", "xaxcxabc", False))
-    self.dmp.Diff_DualThreshold = 32
+    self.assertEquals([(self.dmp.DIFF_DELETE, "ABCD"), (self.dmp.DIFF_EQUAL, "a"), (self.dmp.DIFF_DELETE, "="), (self.dmp.DIFF_INSERT, "-"), (self.dmp.DIFF_EQUAL, "bcd"), (self.dmp.DIFF_DELETE, "="), (self.dmp.DIFF_INSERT, "-"), (self.dmp.DIFF_EQUAL, "efghijklmnopqrs"), (self.dmp.DIFF_DELETE, "EFGHIJKLMNOefg")], self.dmp.diff_main("ABCDa=bcd=efghijklmnopqrsEFGHIJKLMNOefg", "a-bcd-efghijklmnopqrs", False))
 
-    # Timeout
-    self.dmp.Diff_Timeout = 0.001  # 1ms
+    # Large equality.
+    self.assertEquals([(self.dmp.DIFF_INSERT, " "), (self.dmp.DIFF_EQUAL,"a"), (self.dmp.DIFF_INSERT,"nd"), (self.dmp.DIFF_EQUAL," [[Pennsylvania]]"), (self.dmp.DIFF_DELETE," and [[New")], self.dmp.diff_main("a [[Pennsylvania]] and [[New", " and [[Pennsylvania]]", False))
+
+    # Timeout.
+    self.dmp.Diff_Timeout = 0.1  # 100ms
     a = "`Twas brillig, and the slithy toves\nDid gyre and gimble in the wabe:\nAll mimsy were the borogoves,\nAnd the mome raths outgrabe.\n"
     b = "I am the very model of a modern major general,\nI've information vegetable, animal, and mineral,\nI know the kings of England, and I quote the fights historical,\nFrom Marathon to Waterloo, in order categorical.\n"
     # Increase the text lengths by 1024 times to ensure a timeout.
     for x in xrange(10):
       a = a + a
       b = b + b
-    self.assertEquals(None, self.dmp.diff_map(a, b))
+    startTime = time.time()
+    self.dmp.diff_main(a, b)
+    endTime = time.time()
+    # Test that we took at least the timeout period.
+    self.assertTrue(self.dmp.Diff_Timeout <= endTime - startTime)
+    # Test that we didn't take forever (be forgiving).
+    # Theoretically this test could fail very occasionally if the
+    # OS task swaps or locks up for a second at the wrong moment.
+    self.assertTrue(self.dmp.Diff_Timeout * 2 > endTime - startTime)
     self.dmp.Diff_Timeout = 0
 
-    # Test the linemode speedup
-    # Must be long to pass the 200 char cutoff.
-    a = "1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n"
-    b = "abcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\nabcdefghij\n"
+    # Test the linemode speedup.
+    # Must be long to pass the 100 char cutoff.
+    # Simple line-mode.
+    a = "1234567890\n" * 13
+    b = "abcdefghij\n" * 13
     self.assertEquals(self.dmp.diff_main(a, b, False), self.dmp.diff_main(a, b, True))
-    a = "1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n1234567890\n"
+
+    # Single line-mode.
+    a = "1234567890" * 13
+    b = "abcdefghij" * 13
+    self.assertEquals(self.dmp.diff_main(a, b, False), self.dmp.diff_main(a, b, True))
+
+    # Overlap line-mode.
+    a = "1234567890\n" * 13
     b = "abcdefghij\n1234567890\n1234567890\n1234567890\nabcdefghij\n1234567890\n1234567890\n1234567890\nabcdefghij\n1234567890\n1234567890\n1234567890\nabcdefghij\n"
     texts_linemode = self.diff_rebuildtexts(self.dmp.diff_main(a, b, True))
     texts_textmode = self.diff_rebuildtexts(self.dmp.diff_main(a, b, False))
     self.assertEquals(texts_textmode, texts_linemode)
+
+    # Test null inputs.
+    try:
+      self.dmp.diff_main(None, None)
+      self.assertFalse(True)
+    except ValueError:
+      # Exception expected.
+      pass
 
 
 class MatchTest(DiffMatchPatchTest):
   """MATCH TEST FUNCTIONS"""
 
   def testMatchAlphabet(self):
-    # Initialise the bitmasks for Bitap
+    # Initialise the bitmasks for Bitap.
     self.assertEquals({"a":4, "b":2, "c":1}, self.dmp.match_alphabet("abc"))
 
     self.assertEquals({"a":37, "b":18, "c":8}, self.dmp.match_alphabet("abcaba"))
@@ -467,19 +535,19 @@ class MatchTest(DiffMatchPatchTest):
   def testMatchBitap(self):
     self.dmp.Match_Distance = 100
     self.dmp.Match_Threshold = 0.5
-    # Exact matches
+    # Exact matches.
     self.assertEquals(5, self.dmp.match_bitap("abcdefghijk", "fgh", 5))
 
     self.assertEquals(5, self.dmp.match_bitap("abcdefghijk", "fgh", 0))
 
-    # Fuzzy matches
+    # Fuzzy matches.
     self.assertEquals(4, self.dmp.match_bitap("abcdefghijk", "efxhi", 0))
 
     self.assertEquals(2, self.dmp.match_bitap("abcdefghijk", "cdefxyhijk", 5))
 
     self.assertEquals(-1, self.dmp.match_bitap("abcdefghijk", "bxy", 1))
 
-    # Overflow
+    # Overflow.
     self.assertEquals(2, self.dmp.match_bitap("123456789xx0", "3456789x0", 2))
 
     self.assertEquals(0, self.dmp.match_bitap("abcdef", "xxabc", 4))
@@ -488,7 +556,7 @@ class MatchTest(DiffMatchPatchTest):
 
     self.assertEquals(0, self.dmp.match_bitap("abcdef", "xabcdefy", 0))
 
-    # Threshold test
+    # Threshold test.
     self.dmp.Match_Threshold = 0.4
     self.assertEquals(4, self.dmp.match_bitap("abcdefghijk", "efxyhi", 1))
 
@@ -499,12 +567,12 @@ class MatchTest(DiffMatchPatchTest):
     self.assertEquals(1, self.dmp.match_bitap("abcdefghijk", "bcdef", 1))
     self.dmp.Match_Threshold = 0.5
 
-    # Multiple select
+    # Multiple select.
     self.assertEquals(0, self.dmp.match_bitap("abcdexyzabcde", "abccde", 3))
 
     self.assertEquals(8, self.dmp.match_bitap("abcdexyzabcde", "abccde", 5))
 
-    # Distance test
+    # Distance test.
     self.dmp.Match_Distance = 10  # Strict location.
     self.assertEquals(-1, self.dmp.match_bitap("abcdefghijklmnopqrstuvwxyz", "abcdefg", 24))
 
@@ -515,8 +583,8 @@ class MatchTest(DiffMatchPatchTest):
 
 
   def testMatchMain(self):
-    # Full match
-    # Shortcut matches
+    # Full match.
+    # Shortcut matches.
     self.assertEquals(0, self.dmp.match_main("abcdef", "abcdef", 1000))
 
     self.assertEquals(-1, self.dmp.match_main("", "abcdef", 1))
@@ -529,17 +597,25 @@ class MatchTest(DiffMatchPatchTest):
 
     self.assertEquals(0, self.dmp.match_main("abcdef", "abcdefy", 0))
 
-    # Complex match
+    # Complex match.
     self.dmp.Match_Threshold = 0.7
     self.assertEquals(4, self.dmp.match_main("I am the very model of a modern major general.", " that berry ", 5))
     self.dmp.Match_Threshold = 0.5
+
+    # Test null inputs.
+    try:
+      self.dmp.match_main(None, None, 0)
+      self.assertFalse(True)
+    except ValueError:
+      # Exception expected.
+      pass
 
 
 class PatchTest(DiffMatchPatchTest):
   """PATCH TEST FUNCTIONS"""
 
   def testPatchObj(self):
-    # Patch Object
+    # Patch Object.
     p = dmp_module.patch_obj()
     p.start1 = 20
     p.start2 = 21
@@ -561,11 +637,13 @@ class PatchTest(DiffMatchPatchTest):
 
     self.assertEquals("@@ -0,0 +1,3 @@\n+abc\n", str(self.dmp.patch_fromText("@@ -0,0 +1,3 @@\n+abc\n")[0]))
 
-    # Generates error
+    # Generates error.
     try:
-      self.assertEquals(ValueError, self.dmp.patch_fromText("Bad\nPatch\n"))
+      self.dmp.patch_fromText("Bad\nPatch\n")
+      self.assertFalse(True)
     except ValueError:
-      self.assertTrue(True)
+      # Exception expected.
+      pass
 
   def testPatchToText(self):
     strp = "@@ -21,18 +22,17 @@\n jump\n-s\n+ed\n  over \n-the\n+a\n  laz\n"
@@ -598,6 +676,10 @@ class PatchTest(DiffMatchPatchTest):
     self.assertEquals("@@ -1,27 +1,28 @@\n Th\n-e\n+at\n  quick brown fox jumps. \n", str(p))
 
   def testPatchMake(self):
+    # Null case.
+    patches = self.dmp.patch_make("", "")
+    self.assertEquals("", self.dmp.patch_toText(patches))
+
     text1 = "The quick brown fox jumps over the lazy dog."
     text2 = "That quick brown fox jumped over a lazy dog."
     # Text2+Text1 inputs.
@@ -641,12 +723,24 @@ class PatchTest(DiffMatchPatchTest):
     patches = self.dmp.patch_make(text1, text2)
     self.assertEquals(expectedPatch, self.dmp.patch_toText(patches))
 
+    # Test null inputs.
+    try:
+      self.dmp.patch_make(None, None)
+      self.assertFalse(True)
+    except ValueError:
+      # Exception expected.
+      pass
+
   def testPatchSplitMax(self):
-    # Python's really got no need for this function, but other languages do.
-    self.dmp.Match_MaxBits = 32
-    patches = self.dmp.patch_make("abcdef1234567890123456789012345678901234567890123456789012345678901234567890uvwxyz", "abcdefuvwxyz")
+    # Assumes that Match_MaxBits is 32.
+    patches = self.dmp.patch_make("abcdefghijklmnopqrstuvwxyz01234567890", "XabXcdXefXghXijXklXmnXopXqrXstXuvXwxXyzX01X23X45X67X89X0")
     self.dmp.patch_splitMax(patches)
-    self.assertEquals("@@ -3,32 +3,8 @@\n cdef\n-123456789012345678901234\n 5678\n@@ -27,32 +3,8 @@\n cdef\n-567890123456789012345678\n 9012\n@@ -51,30 +3,8 @@\n cdef\n-9012345678901234567890\n uvwx\n", self.dmp.patch_toText(patches))
+    self.assertEquals("@@ -1,32 +1,46 @@\n+X\n ab\n+X\n cd\n+X\n ef\n+X\n gh\n+X\n ij\n+X\n kl\n+X\n mn\n+X\n op\n+X\n qr\n+X\n st\n+X\n uv\n+X\n wx\n+X\n yz\n+X\n 012345\n@@ -25,13 +39,18 @@\n zX01\n+X\n 23\n+X\n 45\n+X\n 67\n+X\n 89\n+X\n 0\n", self.dmp.patch_toText(patches))
+
+    patches = self.dmp.patch_make("abcdef1234567890123456789012345678901234567890123456789012345678901234567890uvwxyz", "abcdefuvwxyz")
+    oldToText = self.dmp.patch_toText(patches)
+    self.dmp.patch_splitMax(patches)
+    self.assertEquals(oldToText, self.dmp.patch_toText(patches))
 
     patches = self.dmp.patch_make("1234567890123456789012345678901234567890123456789012345678901234567890", "abc")
     self.dmp.patch_splitMax(patches)
@@ -655,64 +749,97 @@ class PatchTest(DiffMatchPatchTest):
     patches = self.dmp.patch_make("abcdefghij , h : 0 , t : 1 abcdefghij , h : 0 , t : 1 abcdefghij , h : 0 , t : 1", "abcdefghij , h : 1 , t : 1 abcdefghij , h : 1 , t : 1 abcdefghij , h : 0 , t : 1")
     self.dmp.patch_splitMax(patches)
     self.assertEquals("@@ -2,32 +2,32 @@\n bcdefghij , h : \n-0\n+1\n  , t : 1 abcdef\n@@ -29,32 +29,32 @@\n bcdefghij , h : \n-0\n+1\n  , t : 1 abcdef\n", self.dmp.patch_toText(patches))
-    self.dmp.Match_MaxBits = 0
 
   def testPatchAddPadding(self):
-    # Both edges full
+    # Both edges full.
     patches = self.dmp.patch_make("", "test")
     self.assertEquals("@@ -0,0 +1,4 @@\n+test\n", self.dmp.patch_toText(patches))
     self.dmp.patch_addPadding(patches)
-    self.assertEquals("@@ -1,8 +1,12 @@\n %00%01%02%03\n+test\n %00%01%02%03\n", self.dmp.patch_toText(patches))
+    self.assertEquals("@@ -1,8 +1,12 @@\n %01%02%03%04\n+test\n %01%02%03%04\n", self.dmp.patch_toText(patches))
 
-    # Both edges partial
+    # Both edges partial.
     patches = self.dmp.patch_make("XY", "XtestY")
     self.assertEquals("@@ -1,2 +1,6 @@\n X\n+test\n Y\n", self.dmp.patch_toText(patches))
     self.dmp.patch_addPadding(patches)
-    self.assertEquals("@@ -2,8 +2,12 @@\n %01%02%03X\n+test\n Y%00%01%02\n", self.dmp.patch_toText(patches))
+    self.assertEquals("@@ -2,8 +2,12 @@\n %02%03%04X\n+test\n Y%01%02%03\n", self.dmp.patch_toText(patches))
 
-    # Both edges none
+    # Both edges none.
     patches = self.dmp.patch_make("XXXXYYYY", "XXXXtestYYYY")
     self.assertEquals("@@ -1,8 +1,12 @@\n XXXX\n+test\n YYYY\n", self.dmp.patch_toText(patches))
     self.dmp.patch_addPadding(patches)
     self.assertEquals("@@ -5,8 +5,12 @@\n XXXX\n+test\n YYYY\n", self.dmp.patch_toText(patches))
 
   def testPatchApply(self):
-    # Exact match
+    self.dmp.Match_Distance = 1000
+    self.dmp.Match_Threshold = 0.5
+    self.dmp.Patch_DeleteThreshold = 0.5
+    # Null case.
+    patches = self.dmp.patch_make("", "")
+    results = self.dmp.patch_apply(patches, "Hello world.")
+    self.assertEquals(("Hello world.", []), results)
+
+    # Exact match.
     patches = self.dmp.patch_make("The quick brown fox jumps over the lazy dog.", "That quick brown fox jumped over a lazy dog.")
     results = self.dmp.patch_apply(patches, "The quick brown fox jumps over the lazy dog.")
     self.assertEquals(("That quick brown fox jumped over a lazy dog.", [True, True]), results)
 
-    # Partial match
+    # Partial match.
     results = self.dmp.patch_apply(patches, "The quick red rabbit jumps over the tired tiger.")
     self.assertEquals(("That quick red rabbit jumped over a tired tiger.", [True, True]), results)
 
-    # Failed match
+    # Failed match.
     results = self.dmp.patch_apply(patches, "I am the very model of a modern major general.")
     self.assertEquals(("I am the very model of a modern major general.", [False, False]), results)
 
-    # No side effects
+    # Big delete, small change.
+    patches = self.dmp.patch_make("x1234567890123456789012345678901234567890123456789012345678901234567890y", "xabcy")
+    results = self.dmp.patch_apply(patches, "x123456789012345678901234567890-----++++++++++-----123456789012345678901234567890y")
+    self.assertEquals(("xabcy", [True, True]), results)
+
+    # Big delete, big change 1.
+    patches = self.dmp.patch_make("x1234567890123456789012345678901234567890123456789012345678901234567890y", "xabcy")
+    results = self.dmp.patch_apply(patches, "x12345678901234567890---------------++++++++++---------------12345678901234567890y")
+    self.assertEquals(("xabc12345678901234567890---------------++++++++++---------------12345678901234567890y", [False, True]), results)
+
+    # Big delete, big change 2.
+    self.dmp.Patch_DeleteThreshold = 0.6
+    patches = self.dmp.patch_make("x1234567890123456789012345678901234567890123456789012345678901234567890y", "xabcy")
+    results = self.dmp.patch_apply(patches, "x12345678901234567890---------------++++++++++---------------12345678901234567890y")
+    self.assertEquals(("xabcy", [True, True]), results)
+    self.dmp.Patch_DeleteThreshold = 0.5
+
+    # Compensate for failed patch.
+    self.dmp.Match_Threshold = 0.0
+    self.dmp.Match_Distance = 0
+    patches = self.dmp.patch_make("abcdefghijklmnopqrstuvwxyz--------------------1234567890", "abcXXXXXXXXXXdefghijklmnopqrstuvwxyz--------------------1234567YYYYYYYYYY890")
+    results = self.dmp.patch_apply(patches, "ABCDEFGHIJKLMNOPQRSTUVWXYZ--------------------1234567890")
+    self.assertEquals(("ABCDEFGHIJKLMNOPQRSTUVWXYZ--------------------1234567YYYYYYYYYY890", [False, True]), results)
+    self.dmp.Match_Threshold = 0.5
+    self.dmp.Match_Distance = 1000
+
+    # No side effects.
     patches = self.dmp.patch_make("", "test")
     patchstr = self.dmp.patch_toText(patches)
     results = self.dmp.patch_apply(patches, "")
     self.assertEquals(patchstr, self.dmp.patch_toText(patches))
 
-    # No side effects with major delete
+    # No side effects with major delete.
     patches = self.dmp.patch_make("The quick brown fox jumps over the lazy dog.", "Woof")
     patchstr = self.dmp.patch_toText(patches)
     self.dmp.patch_apply(patches, "The quick brown fox jumps over the lazy dog.")
     self.assertEquals(patchstr, self.dmp.patch_toText(patches))
 
-    # Edge exact match
+    # Edge exact match.
     patches = self.dmp.patch_make("", "test")
     self.dmp.patch_apply(patches, "")
     self.assertEquals(("test", [True]), results)
 
-    # Near edge exact match
+    # Near edge exact match.
     patches = self.dmp.patch_make("XY", "XtestY")
     results = self.dmp.patch_apply(patches, "XY")
     self.assertEquals(("XtestY", [True]), results)
 
-    # Edge partial match
+    # Edge partial match.
     patches = self.dmp.patch_make("y", "y123")
     results = self.dmp.patch_apply(patches, "x")
     self.assertEquals(("x123", [True]), results)
